@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>markx</title>
+  
+  
+  <link href="/atom.xml" rel="self"/>
+  
+  <link href="https://markx.github.io/"/>
+  <updated>2018-09-03T20:37:19.943Z</updated>
+  <id>https://markx.github.io/</id>
+  
+  <author>
+    <name>Ke Xu</name>
+    
+  </author>
+  
+  <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>Make CHICKEN Work With HTTPS On Mac</title>
+    <link href="https://markx.github.io/2018/09/03/make-chicken-work-with-https-on-mac/"/>
+    <id>https://markx.github.io/2018/09/03/make-chicken-work-with-https-on-mac/</id>
+    <published>2018-09-03T18:20:06.000Z</published>
+    <updated>2018-09-03T20:37:19.943Z</updated>
+    
+    <content type="html"><![CDATA[<p>I tried to write a web scraper in CHICKEN Scheme, but it didn’t go well not far from the beginning. I had OpenSSL installed via Homebrew, and installed the <code>http-client</code> and <code>openssl</code> eggs. But when I tried to get the content of an HTTPS website, it showed an error:<br><figure class="highlight plain"><table><tr><td class="code"><pre><div class="line">Error: (ssl-do-handshake) ssl: library=SSL routines, function=ssl3_get_server_certificate, reason=certificate verify failed</div><div class="line"></div><div class="line">Call history:</div><div class="line"></div><div class="line">intarweb.scm:798: g2624</div><div class="line">intarweb.scm:775: write-request-line</div><div class="line">intarweb.scm:749: http-method-&gt;string</div><div class="line">intarweb.scm:750: uri-common#uri-&gt;string</div><div class="line">intarweb.scm:751: number-&gt;string</div><div class="line">intarweb.scm:752: number-&gt;string</div><div class="line">intarweb.scm:748: string-append</div><div class="line">intarweb.scm:748: display</div><div class="line">http-client.scm:571: k776</div><div class="line">http-client.scm:571: g780</div><div class="line">http-client.scm:700: close-connection!</div><div class="line">http-client.scm:225: close-input-port</div><div class="line">http-client.scm:226: close-output-port</div><div class="line">http-client.scm:701: max-retry-attempts</div><div class="line">http-client.scm:702: max-retry-attempts</div><div class="line">http-client.scm:705: raise  &lt;--</div></pre></td></tr></table></figure></p><p>The problem is from the setup between the openssl egg and the OpenSSL library. Because Apple has deprecated use of OpenSSL in favor of its own TLS and crypto libraries, the OpenSSL from Homebrew is not symlinked into the standard location, and its CA file is put at <code>/usr/local/etc/openssl/cert.pem</code>. And the openssl egg doesn’t know to look at this location.</p><p>So to make it work, we need to make sure that the openssl egg uses this CA file. I didn’t find a compiler option or some arguments to config this, so I had to change the egg’s code to make it work.</p><p>Get the openssl egg’s source code, and edit <code>openssl.scm</code>:</p><figure class="highlight bash"><table><tr><td class="code"><pre><div class="line">$ chicken-install -r openssl</div><div class="line">$ <span class="built_in">cd</span> openssl</div><div class="line">$ open openssl.scm</div></pre></td></tr></table></figure><p>In the function <code>ssl-make-client-context*</code>, there is the code:<br><figure class="highlight scheme"><table><tr><td class="code"><pre><div class="line">(<span class="name"><span class="builtin-name">define</span></span> (<span class="name">ssl-make-client-context*</span> #!key (<span class="name">protocol</span> <span class="symbol">'tlsv12</span>) (<span class="name">cipher-list</span> <span class="string">"DEFAULT"</span>) certificate private-key (<span class="name">private-key-type</span> <span class="symbol">'rsa</span>) private-key-asn1? certificate-authorities certificate-authority-directory (<span class="name">verify?</span> <span class="literal">#t</span>))</div><div class="line">  (<span class="name"><span class="builtin-name">unless</span></span> (<span class="name"><span class="builtin-name">or</span></span> certificate-authorities certificate-authority-directory)</div><div class="line">    (<span class="name"><span class="builtin-name">set!</span></span> certificate-authority-directory (<span class="name">ssl-default-certificate-authority-directory</span>)))</div><div class="line">    </div><div class="line">    ...</div></pre></td></tr></table></figure></p><p>This means if neither the CA file, or the CA directory is available, it uses the default CA directory. And we can do something similar: in addition to using the default CA directory, we just specify the CA file:</p><figure class="highlight scheme"><table><tr><td class="code"><pre><div class="line">(<span class="name"><span class="builtin-name">define</span></span> ssl-default-certificate-authorities</div><div class="line">  (<span class="name">make-parameter</span> <span class="string">"/usr/local/etc/openssl/cert.pem"</span>))</div><div class="line"></div><div class="line">(<span class="name"><span class="builtin-name">define</span></span> (<span class="name">ssl-make-client-context*</span> #!key (<span class="name">protocol</span> <span class="symbol">'tlsv12</span>) (<span class="name">cipher-list</span> <span class="string">"DEFAULT"</span>) certificate private-key (<span class="name">private-key-type</span> <span class="symbol">'rsa</span>) private-key-asn1? certificate-authorities certificate-authority-directory (<span class="name">verify?</span> <span class="literal">#t</span>))</div><div class="line">  (<span class="name"><span class="builtin-name">unless</span></span> (<span class="name"><span class="builtin-name">or</span></span> certificate-authorities certificate-authority-directory)</div><div class="line">    (<span class="name"><span class="builtin-name">set!</span></span> certificate-authority-directory (<span class="name">ssl-default-certificate-authority-directory</span>)))</div><div class="line">  (<span class="name"><span class="builtin-name">unless</span></span> certificate-authorities</div><div class="line">    (<span class="name"><span class="builtin-name">set!</span></span> certificate-authorities (<span class="name">ssl-default-certificate-authorities</span>)))</div><div class="line"></div><div class="line">     ...</div></pre></td></tr></table></figure><p>Then in the source code directory, install the modified local version:</p><figure class="highlight bash"><table><tr><td class="code"><pre><div class="line">$ chicken-install -t <span class="built_in">local</span> <span class="_">-l</span> .</div></pre></td></tr></table></figure><p>And that’s it. Now the http-client egg should work with HTTPS sites.</p>]]></content>
+    
+    <summary type="html">
+    
+      
+      
+        &lt;p&gt;I tried to write a web scraper in CHICKEN Scheme, but it didn’t go well not far from the beginning. I had OpenSSL installed via Homebrew,
+      
+    
+    </summary>
+    
+    
+      <category term="chicken" scheme="https://markx.github.io/tags/chicken/"/>
+    
+      <category term="scheme" scheme="https://markx.github.io/tags/scheme/"/>
+    
+  </entry>
+  
+</feed>
